@@ -7,26 +7,15 @@ class IterativeShell:
     def __init__(self):
         self.commands = {
             "hello": self.hello,
-            "data": self.data,
-            "ik": self.ik,
+            "load": self.load,
             "view": self.view,
             "filter": self.filter_where,
             "rollback": self.rollback,
             "drop": self.drop,
-            "score": self.score,
             "columns": self.columns,
         }
 
         self.data = {
-            "ik": {
-                "clover": "clv",
-                "clvr": "clv",
-                "tck": "telecheck",
-                "ecommerce": "ecom",
-                "chargebacks": "chargeback",
-                "qsr": "quick_service",
-                "act": "mag"
-            },
             "frames": {
                 "base": None,
                 "dataframe": None,
@@ -43,6 +32,22 @@ class IterativeShell:
     
     def hello(self):
         return "Hello World!"
+
+    def load(self, *args):
+        args = [_ for _ in args if _ != '']
+        if args:
+            file_path = args[0]
+        else:
+            file_path = input(" : enter file path to csv: ")
+
+        try:
+            dataframe = pd.read_csv(file_path, low_memory=False)
+            self.data["frames"]["dataframe"] = dataframe
+            response = "data successfully loaded!"
+            return response
+        except:
+            response = f"error. data not loaded! tried to load with path '{file_path}'"
+            return response
 
     def _save_frames_to_memory(self):
         if self.data.get("has_updated"):
