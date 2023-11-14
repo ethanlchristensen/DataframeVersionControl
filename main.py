@@ -1,4 +1,3 @@
-import re
 import os
 import pandas as pd
 
@@ -6,16 +5,21 @@ class IterativeShell:
 
     def __init__(self):
         self.commands = {
-            "hello": self.hello,
-            "load": self.load,
-            "view": self.view,
-            "filter": self.filter_where,
-            "rollback": self.rollback,
-            "drop": self.drop,
-            "columns": self.columns,
+            "hello": {'command': self.hello, 'info': 'test command'},
+            "data": {'command': self.data, 'info': 'command to load in the data'},
+            "view": {'command': self.view, 'info': 'command to view the current dataframe'},
+            "filter": {'command': self.filter_where, 'info': 'command to filter the dataframe'},
+            "rollback": {'command': self.rollback, 'info': 'command to revert back to older version of the dataframe'},
+            "drop": {'command': self.drop, 'info': 'command to drop columns from the dataframe'},
+            "columns": {'command': self.columns, 'info': 'command to see the columns in the dataframe'},
+            "base": {'command': self.base_load, 'info': 'command to load the orignal df into the base store (for scoring), called when preious state is loaded'},
+            "help": {'command': self.help, 'info': 'command to see info about other commands'},
+            "csv": {'command': self.csv, 'info': 'command to save the current dataframe to a csv'}
         }
 
         self.data = {
+            "views": {
+            },
             "frames": {
                 "base": None,
                 "dataframe": None,
@@ -32,22 +36,6 @@ class IterativeShell:
     
     def hello(self):
         return "Hello World!"
-
-    def load(self, *args):
-        args = [_ for _ in args if _ != '']
-        if args:
-            file_path = args[0]
-        else:
-            file_path = input(" : enter file path to csv: ")
-
-        try:
-            dataframe = pd.read_csv(file_path, low_memory=False)
-            self.data["frames"]["dataframe"] = dataframe
-            response = "data successfully loaded!"
-            return response
-        except:
-            response = f"error. data not loaded! tried to load with path '{file_path}'"
-            return response
 
     def _save_frames_to_memory(self):
         if self.data.get("has_updated"):
@@ -84,16 +72,52 @@ class IterativeShell:
 
     def view(self, *args):
         if not self.is_loaded(): return "no data loaded!"
+
+        view_df = self.data.get("frames").get("dataframe")
+
         if args and args[0].strip() != '':
-            filter_cols = args[0]
-            if filter_cols[0] != "[" or filter_cols[-1] != "]":
+            command_args = args[0]
+            if "|" in command_args:
+                columns = command_args.split("|")[0]
+                filters = command_args.split("|")[1]
+            else:
+                columns = command_args
+                filters = None
+
+            valid_columns = view_df.columns.values.tolist()
+
+            if columns[0] == "[" and columns[-1] == "]":
+                columns = [_.strip() for _ in columns[1:-1].split(",")]
+                columns = [col for col in columns if col in valid_columns]
+            elif columns.startswith("load"):
+                try:
+                    _view_tag = columns.split(":")[1]
+                except:
+                    return "use 'view load:<view-name>' to load an existing view"
+                
+                columns = self.data.get("views").get(_view_tag)
+
+                if not columns:
+                    return f"could not load view called '{_view_tag}'"
+            else:
                 return "arg of 'view' must look like '[col1, col2, col3, ...]' to get a filtered view"
-            valid_columns = self.data.get("frames").get("dataframe").columns.values.tolist()
-            filter_cols = [_.strip() for _ in filter_cols[1:-1].split(",")]
-            filter_cols = [col for col in filter_cols if col in valid_columns]
-            print(self.data.get("frames").get("dataframe").head()[filter_cols])
+
+            if filters:
+                filters = [_.strip() for _ in filters.split(",")]
+                for filter in filters:
+                    _filter = [_.strip() for _ in filter.split(" ") if _ != ""]
+
+                    if len(_filter) != 3:
+                        print(f" : filter '{filter}' failed")
+                        continue
+
+                    view_df = self._filter(view_df, _filter[0], _filter[1], _filter[2])
+                    
+            print(view_df.head()[columns])
         else:
-            print(self.data.get("frames").get("dataframe").head())
+            print(view_df.head())
+        
+        print(f" : count of rows: {len(view_df)}")
 
     def _bubble(self, bubbleframe):
         if not self.data.get("has_updated"):
@@ -107,10 +131,40 @@ class IterativeShell:
             v1,
             v2
         )
+    
+    def _filter(self, in_df, column, column_is, filter_value):
+        out_df = in_df.copy()
+
+        if (filter_value.isdigit()) or (filter_value[0] == '-' and filter_value[1:].isdigit()):
+            filter_value = int(filter_value)
+        if filter_value in ["True", "False"]:
+            filter_value = filter_value == "True"
+        
+        try:
+            if column_is == "==":
+                out_df = out_df[out_df[column]==filter_value]
+            elif column_is == "!=":
+                out_df = out_df[out_df[column]!=filter_value]
+            elif column_is == ">=":
+                out_df = out_df[out_df[column]>=filter_value]
+            elif column_is == "<=":
+                out_df = out_df[out_df[column]<=filter_value]
+            elif column_is == ">":
+                out_df = out_df[out_df[column]>filter_value]
+            elif column_is == "<":
+                out_df = out_df[out_df[column]<filter_value]
+        except Exception as error:
+            print(f" : filter not applied, error encountered: {error}")
+            return in_df
+
+        return out_df
 
     def filter_where(self, *args):
         if not self.is_loaded(): return "no data loaded!"
         current_dataframe = self.data.get("frames").get("dataframe").copy()
+
+        previous_size = len(current_dataframe)
+
         valid_columns = self.data.get("frames").get("dataframe")
         valid_filters = ("==", "!=", ">=", "<=", "<", ">")
         column = input(" : column to filter on: ")
@@ -121,29 +175,15 @@ class IterativeShell:
         if column_is not in valid_filters: return "not a valid filter!"
         filter_value = input(" : enter value to filter by: ")
 
-        if (filter_value.isdigit()) or (filter_value[0] == '-' and filter_value[1:].isdigit()):
-            filter_value = int(filter_value)
-        if filter_value in ["True", "False"]:
-            filter_value = filter_value == "True"
-        
-        try:
-            if column_is == "==":
-                current_dataframe = current_dataframe[current_dataframe[column]==filter_value]
-            elif column_is == "!=":
-                current_dataframe = current_dataframe[current_dataframe[column]!=filter_value]
-            elif column_is == ">=":
-                current_dataframe = current_dataframe[current_dataframe[column]>=filter_value]
-            elif column_is == "<=":
-                current_dataframe = current_dataframe[current_dataframe[column]<=filter_value]
-            elif column_is == ">":
-                current_dataframe = current_dataframe[current_dataframe[column]>filter_value]
-            elif column_is == "<":
-                current_dataframe = current_dataframe[current_dataframe[column]<filter_value]
-        except Exception as error:
-            return f"an error was encounter ; {error}"
+        current_dataframe = self._filter(current_dataframe, column, column_is, filter_value)
+
+        new_size = len(current_dataframe)
 
         self._bubble(current_dataframe.copy())
+
         del current_dataframe
+
+        print(f" : old size: {previous_size}\n : new size: {new_size}\n : % of original: {(new_size/previous_size)*100:.2f}%")
 
         return "filter successfully applied!"
 
@@ -181,9 +221,40 @@ class IterativeShell:
 
         return "drop successfully applied!"
 
+    def data(self, *args):
+        pass
+        
+    def base_load(self, *args):
+        pass
+
     def columns(self, *args):
         if not self.is_loaded(): return "no data loaded!"
         return ", ".join(self.data.get("frames").get("dataframe").columns.values.tolist())
+
+    def csv(self, *args):
+        df_to_save = self.data.get('frames').get('dataframe')
+        
+        if args and args[0].strip() != '':
+            columns = args[0]
+
+            if columns[0] != "[" or columns[-1] != "]":
+                return "arg of 'view' must look like '[col1, col2, col3, ...]' to get a filtered view"
+
+            valid_columns = df_to_save.columns.values.tolist()
+            columns = [_.strip() for _ in columns[1:-1].split(",")]
+            columns = [col for col in columns if col in valid_columns]
+
+            df_to_save[columns].to_csv(f'./output_csv/save_{len(os.listdir("./output_csv"))+1}.csv')
+            
+        else:
+            if (input(f" : do you want to save all columns to a csV? ({len(df_to_save.columns)} total columns) (y/n)")) == 'y':
+                df_to_save.to_csv(f'./output_csv/save_{len(os.listdir("./output_csv"))+1}.csv')
+            else:
+                return "no data saved to csv"
+        
+    def help(self, *args):
+        for command, command_vals in self.commands.items():
+            print(f"{command:<15s}: {command_vals['info']}")
 
     def enter(self):
         self._check_and_load()
@@ -196,7 +267,7 @@ class IterativeShell:
                     _q_parts = _q.split(" ")
                     if _q_parts[0] in self.commands.keys():
                         try:
-                            response = self.commands[_q_parts[0]](" ".join(_q_parts[1:]))
+                            response = self.commands[_q_parts[0]]['command'](" ".join(_q_parts[1:]))
                         except KeyboardInterrupt:
                             response = "command interrupted"
                         except Exception as error:
@@ -213,7 +284,6 @@ class IterativeShell:
             print("KeyboardInterrupt")
             self._save_frames_to_memory()
             print(" : exiting")
-
 
 if __name__ == "__main__":
     shell = IterativeShell()
