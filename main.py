@@ -5,20 +5,22 @@ class IterativeShell:
 
     def __init__(self):
         self.commands = {
-            "hello": {'command': self.hello, 'info': 'test command'},
-            "data": {'command': self.data, 'info': 'command to load in the data'},
-            "view": {'command': self.view, 'info': 'command to view the current dataframe'},
-            "filter": {'command': self.filter_where, 'info': 'command to filter the dataframe'},
+            "hello":    {'command': self.hello, 'info': 'test command'},
+            "data":     {'command': self.data, 'info': 'command to load in the data'},
+            "view":     {'command': self.view, 'info': 'command to view the current dataframe'},
+            "filter":   {'command': self.filter_where, 'info': 'command to filter the dataframe'},
             "rollback": {'command': self.rollback, 'info': 'command to revert back to older version of the dataframe'},
-            "drop": {'command': self.drop, 'info': 'command to drop columns from the dataframe'},
-            "columns": {'command': self.columns, 'info': 'command to see the columns in the dataframe'},
-            "base": {'command': self.base_load, 'info': 'command to load the orignal df into the base store (for scoring), called when preious state is loaded'},
-            "help": {'command': self.help, 'info': 'command to see info about other commands'},
-            "csv": {'command': self.csv, 'info': 'command to save the current dataframe to a csv'}
+            "drop":     {'command': self.drop, 'info': 'command to drop columns from the dataframe'},
+            "columns":  {'command': self.columns, 'info': 'command to see the columns in the dataframe'},
+            "base":     {'command': self.base_load, 'info': 'command to load the orignal df into the base store (for scoring), called when preious state is loaded'},
+            "help":     {'command': self.help, 'info': 'command to see info about other commands'},
+            "csv":      {'command': self.csv, 'info': 'command to save the current dataframe to a csv'}
         }
 
         self.data = {
             "views": {
+                "small-view": ["NAME", "Species", "GENDER"],
+                "c": ["NAME"],
             },
             "frames": {
                 "base": None,
@@ -222,10 +224,31 @@ class IterativeShell:
         return "drop successfully applied!"
 
     def data(self, *args):
-        pass
+        if args[0] == '':
+            return "must pass in file path to load data"
+        
+        df = pd.read_csv(args[0])
+
+        self.data["frames"]["base"] = df.copy()
+        self.data["frames"]["dataframe"] = df.copy()
+
+        del df
+
+        self.data["has_updated"] = True
+
+        return "data loaded successfully!"
         
     def base_load(self, *args):
-        pass
+        if args[0] == '':
+            return "must pass in file path to load data"
+        
+        df = pd.read_csv(args[0])
+
+        self.data["frames"]["base"] = df.copy()
+
+        del df
+
+        return "data loaded successfully!"
 
     def columns(self, *args):
         if not self.is_loaded(): return "no data loaded!"
@@ -261,10 +284,11 @@ class IterativeShell:
 
         try:
             while (query := input(":: ")) not in ["Q", "q", "quit"]:
-                _query = query.strip().lower()
+                _query = query.strip()
                 _queries = [_.strip() for _ in _query.split("&")]
                 for _q in _queries:
                     _q_parts = _q.split(" ")
+                    _q_parts[0] = _q_parts[0].lower()
                     if _q_parts[0] in self.commands.keys():
                         try:
                             response = self.commands[_q_parts[0]]['command'](" ".join(_q_parts[1:]))
